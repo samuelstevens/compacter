@@ -2,17 +2,16 @@
 import setuptools
 from torch.utils.cpp_extension import BuildExtension, CUDAExtension
 
+description = "PyTorch CUDA kernel implementation of intrinsic dimension operation."
+
 
 def setup_package():
-    long_description = (
-        "PyTorch CUDA kernel implementation of intrinsic dimension operation."
-    )
 
     setuptools.setup(
-        name="seq2seq",
+        name="intrinsic",
         version="0.0.1",
-        description="Compacter",
-        long_description=long_description,
+        description=description,
+        long_description=description,
         long_description_content_type="text/markdown",
         author="Rabeeh Karimi Mahabadi",
         license="MIT License",
@@ -28,15 +27,15 @@ def setup_package():
             "License :: OSI Approved :: MIT License",
             "Topic :: Scientific/Engineering :: Artificial Intelligence",
             "Programming Language :: Python :: 3",
-            "Programming Language :: Python :: 3.7.10",
+            "Programming Language :: Python :: 3.9.7",
         ],
         keywords="text nlp machinelearning",
         ext_modules=[
             CUDAExtension(
-                "projections.fwh_cuda",
+                "intrinsic.fwh_cuda",
                 sources=[
-                    "projections/fwh_cuda/fwh_cpp.cpp",
-                    "projections/fwh_cuda/fwh_cu.cu",
+                    "intrinsic/fwh_cuda/fwh_cpp.cpp",
+                    "intrinsic/fwh_cuda/fwh_cu.cu",
                 ],
             )
         ],
