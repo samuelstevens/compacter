@@ -1,11 +1,25 @@
 """Install Compacter."""
 import setuptools
-from torch.utils.cpp_extension import BuildExtension, CUDAExtension
+import torch
+from torch.utils.cpp_extension import CUDAExtension, BuildExtension
 
 description = "PyTorch CUDA kernel implementation of intrinsic dimension operation."
 
 
 def setup_package():
+    ext_modules = []
+    if torch.cuda.is_available():
+        ext_modules = (
+            [
+                CUDAExtension(
+                    "intrinsic.fwh_cuda",
+                    sources=[
+                        "intrinsic/fwh_cuda/fwh_cpp.cpp",
+                        "intrinsic/fwh_cuda/fwh_cu.cu",
+                    ],
+                )
+            ],
+        )
 
     setuptools.setup(
         name="intrinsic",
@@ -30,18 +44,10 @@ def setup_package():
             "Programming Language :: Python :: 3.9.7",
         ],
         keywords="text nlp machinelearning",
-        ext_modules=[
-            CUDAExtension(
-                "intrinsic.fwh_cuda",
-                sources=[
-                    "intrinsic/fwh_cuda/fwh_cpp.cpp",
-                    "intrinsic/fwh_cuda/fwh_cu.cu",
-                ],
-            )
-        ],
+        ext_modules=ext_modules,
         cmdclass={"build_ext": BuildExtension},
         install_requires=[
-            "torch==1.8.0+cu111",
+            # "torch==1.8.0+cu111",
         ],
     )
 
