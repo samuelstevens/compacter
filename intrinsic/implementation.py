@@ -9,6 +9,7 @@ if torch.cuda.is_available():
 else:
     from .fwh import fast_walsh_hadamard_transform
 
+# Utility functions
 
 def set_seed(seed: int) -> None:
     random.seed(seed)
@@ -16,6 +17,26 @@ def set_seed(seed: int) -> None:
     torch.manual_seed(seed)
     torch.cuda.manual_seed_all(seed)
 
+
+def send_to_device(obj, device):
+    if isinstance(obj, list):
+        return [send_to_device(t, device) for t in obj]
+
+    if isinstance(obj, tuple):
+        return tuple(send_to_device(t, device) for t in obj)
+
+    if isinstance(obj, dict):
+        return {
+            send_to_device(key, device): send_to_device(value, device)
+            for key, value in obj.items()
+        }
+
+    if hasattr(obj, "to"):
+        return obj.to(device)
+
+    return obj
+
+# Actual implementation
 
 class HiddenParam(NamedTuple):
     name: str

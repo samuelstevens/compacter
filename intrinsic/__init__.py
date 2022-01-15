@@ -88,6 +88,8 @@ class IntrinsicDimension(torch.nn.Module):
         # Hide the module from inspection by get_parameters()
         self.m = [module]
 
+        self.device = module.device if hasattr(module, 'device') else torch.device('cpu')
+
         self.use_said = said
 
         self.hidden_params, self.theta_0 = implementation.make_hidden_params(module)
@@ -111,8 +113,6 @@ class IntrinsicDimension(torch.nn.Module):
 
         if self.use_said:
             self.said_parameter = torch.nn.Parameter(torch.ones((self.said_size)))
-
-        self.set_module_weights()
 
         self.logger.info(
             f"Initialized Fastfood wrapper around {module.__class__.__name__}."
@@ -149,6 +149,46 @@ class IntrinsicDimension(torch.nn.Module):
             return getattr(self.hidden, name)
 
         return super().__getattr__(name)
+
+    def to(self, device, non_blocking=False):
+        self.logger.debug(
+            "Before moving [max memory allocated: %.3f]",
+            torch.cuda.max_memory_allocated(),
+        )
+        self.device = device
+
+        self.theta_0 = implementation.send_to_device(self.theta_0, device)
+        self.logger.debug(
+            "After moving theta_0 [max memory allocated: %.3f]",
+            torch.cuda.max_memory_allocated(),
+        )
+        super().to(device)  # moves theta_d
+        self.logger.debug(
+            "After moving theta_d [max memory allocated: %.3f]",
+            torch.cuda.max_memory_allocated(),
+        )
+
+        self.fastfood = implementation.send_to_device(self.fastfood, device)
+        self.logger.debug(
+            "After moving fastfood [max memory allocated: %.3f]",
+            torch.cuda.max_memory_allocated(),
+        )
+
+        self.set_module_weights()  # moves base model
+        self.logger.debug(
+            "After updating base model weights [max memory allocated: %.3f]",
+            torch.cuda.max_memory_allocated(),
+        )
+        self.hidden.to(device)
+        self.logger.debug(
+            "After moving base model [max memory allocated: %.3f]",
+            torch.cuda.max_memory_allocated(),
+        )
+
+        with torch.no_grad():
+            torch.cuda.empty_cache()
+
+        return self
 
 
 __all__ = ["IntrinsicDimension", "FastfoodTransform"]
