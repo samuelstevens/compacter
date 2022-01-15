@@ -44,16 +44,14 @@ class FastfoodTransform(torch.nn.Module):
 
         self.walsh_hadamard = None
 
-    def forward(self, theta_d):
-        assert theta_d.shape == (self.d,)
-        return self._fastfood_transform(theta_d)
-
-    def _fastfood_transform(self, x):
+    def forward(self, x):
         """
         Fastfood transform
         :param x: array of dd dimension
         :return:
         """
+        assert x.shape == (self.d,)
+
         # Pad x if needed
         d_pad = torch.nn.functional.pad(
             x, pad=(0, self.LL - self.d), value=0, mode="constant"
@@ -109,7 +107,7 @@ class IntrinsicDimension(torch.nn.Module):
             int_dim -= self.said_size + 1
 
         self.d = int_dim
-        self.intrinsic_parameter = torch.nn.Parameter(torch.zeros((int_dim)))
+        self.intrinsic_vector = torch.nn.Parameter(torch.zeros((int_dim)))
 
         if self.use_said:
             self.said_parameter = torch.nn.Parameter(torch.ones((self.said_size)))
@@ -121,7 +119,7 @@ class IntrinsicDimension(torch.nn.Module):
         )
 
     def set_module_weights(self):
-        updated = self.fastfood(self.intrinsic_parameter)
+        updated = self.fastfood(self.intrinsic_vector)
 
         start, end = 0, 0
         for i, hidden_param in enumerate(self.hidden_params):

@@ -52,3 +52,37 @@ def test_make_hidden_params_gpt2():
     assert [hp.name for hp in hidden_params] == [
         name for name, param in sorted(model.named_parameters())
     ]
+
+
+def test_fast_walsh_hadamard_grad1():
+    in_tensor = torch.ones(2, requires_grad=True, dtype=torch.double)
+
+    assert torch.autograd.gradcheck(
+        implementation.FastWalshHadamard.apply, in_tensor, eps=1e-6, atol=1e-4
+    )
+
+
+def test_fast_walsh_hadamard_grad2():
+    in_tensor = torch.randn(4, requires_grad=True, dtype=torch.double)
+
+    assert torch.autograd.gradcheck(
+        implementation.FastWalshHadamard.apply, in_tensor, eps=1e-6, atol=1e-4
+    )
+
+
+def test_fast_walsh_hadamard_grad3():
+    in_tensor = torch.randn(64, requires_grad=True, dtype=torch.double)
+
+    assert torch.autograd.gradcheck(
+        implementation.FastWalshHadamard.apply, in_tensor, eps=1e-6, atol=1e-4
+    )
+
+
+def test_fast_walsh_hadamard_forward():
+    in_tensor = torch.tensor([1, 0, 1, 0, 0, 1, 1, 0], dtype=torch.float)
+
+    actual = implementation.FastWalshHadamard.apply(in_tensor)
+
+    expected = torch.tensor([4, 2, 0, -2, 0, 2, 0, 2], dtype=torch.float)
+
+    assert torch.allclose(expected, actual)

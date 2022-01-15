@@ -62,13 +62,12 @@ class FastWalshHadamard(torch.autograd.Function):
     @staticmethod
     def forward(ctx, input):
         ctx.save_for_backward(
-            torch.tensor([1 / np.sqrt(float(input.size(0)))]).to(input)
+            # torch.tensor([1 / input.size(0)], device=input.device)
+            torch.tensor([1 / np.log2(input.size(0))], device=input.device)
         )
-        return fast_walsh_hadamard_transform(input.float(), False)
+        return fast_walsh_hadamard_transform(input, False)
 
     @staticmethod
     def backward(ctx, grad_output):
         (input,) = ctx.saved_tensors
-        return input * fast_walsh_hadamard_transform(
-            grad_output.clone().float(), False
-        ).to(grad_output)
+        return fast_walsh_hadamard_transform(grad_output.clone(), False).to(grad_output)
