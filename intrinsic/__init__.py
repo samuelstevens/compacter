@@ -2,306 +2,155 @@
 # Intrinsic Dimensionality Explains the Effectiveness of Language Model Fine-Tuning
 # https://arxiv.org/abs/2012.13255
 
-from typing import Set, Tuple
+import logging
 
 import numpy as np
 import torch
-from torch.nn import functional as F
 
-if torch.cuda.is_available():
-    from .fwh_cuda import fast_walsh_hadamard_transform
-else:
-    from .fwh import fast_walsh_hadamard_transform
+from . import implementation
 
 
-def fastfood_vars(DD, device=0):
-    """
-    Returns parameters for fast food transform
-    :param DD: desired dimension
-    :return:
-    """
-    ll = int(np.ceil(np.log(DD) / np.log(2)))
-    LL = 2 ** ll
+class FastfoodTransform(torch.nn.Module):
+    logger = logging.getLogger("FastfoodTransform")
 
-    # Binary scaling matrix where $B_{i,i} \in \{\pm 1 \}$ drawn iid
-    BB = torch.FloatTensor(LL).uniform_(0, 2).type(torch.LongTensor)
-    BB = BB * 2 - 1
-    BB.requires_grad_(False)
+    def __init__(self, d, D):
+        super().__init__()
+        self.d = d
+        self.D = D
 
-    # Random permutation matrix
-    Pi = torch.LongTensor(np.random.permutation(LL))
-    Pi.requires_grad_(False)
+        # smallest integer that is larger than log base 2 of dimension
+        ll = int(np.ceil(np.log(self.D) / np.log(2)))
+        self.LL = 2 ** ll
 
-    # Gaussian scaling matrix, whose elements $G_{i,i} \sim \mathcal{N}(0, 1)$
-    GG = torch.FloatTensor(
-        LL,
-    ).normal_()
-    GG.requires_grad_(False)
-    divisor = torch.sqrt(LL * torch.sum(torch.pow(GG, 2)))
-    return [BB.to(device), Pi.to(device), GG.to(device), divisor.to(device), LL]
+        # Binary scaling matrix where $B_{i,i} \in \{\pm 1 \}$ drawn iid
+        BB = torch.FloatTensor(self.LL).uniform_(0, 2).type(torch.LongTensor)
+        BB = (BB * 2 - 1).type(torch.FloatTensor)
+        BB.requires_grad = False
+        self.register_buffer("BB", BB)
 
+        # Random permutation matrix
+        Pi = torch.LongTensor(np.random.permutation(self.LL))
+        Pi.requires_grad = False
+        self.register_buffer("Pi", Pi)
 
-def random_vars(desired_dim, intrinsic_dim, device=0):
-    """Returns a random matrix of the desired dimension."""
-    R = torch.FloatTensor(desired_dim, intrinsic_dim).normal_(std=0.01).to(device)
-    R.requires_grad_(False)
-    divisor = torch.norm(R)
-    return [R, divisor]
+        # Gaussian scaling matrix, whose elements $G_{i,i} \sim \mathcal{N}(0, 1)$
+        GG = torch.FloatTensor(self.LL).normal_()
+        GG.requires_grad = False
+        self.register_buffer("GG", GG)
 
+        # single divisor to normalize transform
+        divisor = torch.sqrt(self.LL * torch.sum(torch.pow(self.GG, 2)))
+        self.register_buffer("divisor", divisor)
 
-def fastfood_torched(
-    x,
-    DD: int,
-    param_list: Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, int],
-):
-    """
-    Fastfood transform
-    :param x: array of dd dimension
-    :param DD: desired dimension
-    :return:
-    """
-    dd = x.size(0)
+        self.walsh_hadamard = None
 
-    BB, Pi, GG, divisor, LL = param_list
-    # Padd x if needed
-    dd_pad = F.pad(x, pad=(0, LL - dd), value=0.0, mode="constant")
-    # From left to right HGPiH(BX), where H is Walsh-Hadamard matrix
-    dd_pad = dd_pad * BB
+    def forward(self, theta_d):
+        assert theta_d.shape == (self.d,)
+        return self._fastfood_transform(theta_d)
 
-    # HGPi(HBX)
-    mul_2 = FastWalshHadamard.apply(dd_pad)
-
-    # HG(PiHBX)
-    mul_3 = mul_2[Pi]
-
-    # H(GPiHBX)
-    mul_3 = mul_3 * GG
-
-    # (HGPiHBX)
-    mul_5 = FastWalshHadamard.apply(mul_3)
-
-    ret = mul_5[: int(DD)]
-    ret = ret / (divisor * np.sqrt(float(DD) / LL))
-    return ret
-
-
-def random_torched(intrinsic_vec, param_list: Tuple[torch.Tensor, int]):
-    """Random dense transform"""
-    R, divisor = param_list
-    result = torch.matmul(R, intrinsic_vec)
-    # TODO: for now we are not normalizing with the divisor, to be added later.
-    return result
-
-
-class FastWalshHadamard(torch.autograd.Function):
-    @staticmethod
-    def forward(ctx, input):
-        ctx.save_for_backward(
-            torch.tensor([1 / np.sqrt(float(input.size(0)))]).to(input)
+    def _fastfood_transform(self, x):
+        """
+        Fastfood transform
+        :param x: array of dd dimension
+        :return:
+        """
+        # Pad x if needed
+        d_pad = torch.nn.functional.pad(
+            x, pad=(0, self.LL - self.d), value=0, mode="constant"
         )
-        return fast_walsh_hadamard_transform(input.float(), False)
 
-    @staticmethod
-    def backward(ctx, grad_output):
-        (input,) = ctx.saved_tensors
-        return input * fast_walsh_hadamard_transform(
-            grad_output.clone().float(), False
-        ).to(grad_output)
+        # From left to right HGPiH(BX), where H is Walsh-Hadamard matrix
+        mul_1 = self.BB * d_pad
+
+        # HGPi(HBX)
+        mul_2 = implementation.FastWalshHadamard.apply(mul_1)
+
+        # HG(PiHBX)
+        mul_3 = mul_2[self.Pi]
+
+        # H(GPiHBX)
+        mul_4 = mul_3 * self.GG
+
+        # (HGPiHBX)
+        mul_5 = implementation.FastWalshHadamard.apply(mul_4)
+
+        return torch.div(
+            mul_5[: self.D], self.divisor * np.sqrt(float(self.D) / self.LL)
+        )
 
 
-class IntrinsicDimensionHook:
+class IntrinsicDimension(torch.nn.Module):
+    logger = logging.getLogger("intrinsic.IntrinsicDimension")
+
     def __init__(
-        self,
-        module: torch.nn.Module,
-        intrinsic_dimension: int,
-        str_filter: Set[str] = set(),
-        said=False,
-        projection="fastfood",
-        device="cpu",
+        self, module: torch.nn.Module, int_dim: int, said: bool, fastfood_seed: int
     ):
-        """
-        Adds hook only for the parameters selected inside the str_filter, and if str_filter is empty, this selects
-        all the parameters with gradient = True.
-        """
-        self.projection = projection
-        self.name_base_localname = []
-        self.initial_value = dict()
-        self.projection_params = {}
-        self.said = said
-        self.device = device
-        self.said_size = len(list(module.named_parameters()))
-        if self.said:
-            assert intrinsic_dimension > self.said_size
-            intrinsic_dimension -= self.said_size + 1
+        super().__init__()
 
-        self.intrinsic_dimension = intrinsic_dimension
-        self.intrinsic_parameter = torch.nn.Parameter(
-            torch.zeros((intrinsic_dimension)).cpu()
-            if device == "cpu"
-            else torch.zeros((intrinsic_dimension)).cuda()
+        # Hide the module from inspection by get_parameters()
+        self.m = [module]
+
+        self.use_said = said
+
+        self.hidden_params, self.theta_0 = implementation.make_hidden_params(module)
+
+        for hidden_param in self.hidden_params:
+            delattr(hidden_param.module, hidden_param.module_name)
+
+        self.fastfood_seed = fastfood_seed
+        implementation.set_seed(self.fastfood_seed)
+
+        D = self.theta_0.shape[0]
+        self.fastfood = FastfoodTransform(int_dim, D)
+
+        self.said_size = len(self.hidden_params)
+        if self.use_said:
+            assert int_dim > self.said_size
+            int_dim -= self.said_size + 1
+
+        self.d = int_dim
+        self.intrinsic_parameter = torch.nn.Parameter(torch.zeros((int_dim)))
+
+        if self.use_said:
+            self.said_parameter = torch.nn.Parameter(torch.ones((self.said_size)))
+
+        self.set_module_weights()
+
+        self.logger.info(
+            f"Initialized Fastfood wrapper around {module.__class__.__name__}."
         )
-        module.register_parameter("intrinsic_parameter", self.intrinsic_parameter)
-        setattr(module, "intrinsic_parameter", self.intrinsic_parameter)
 
-        length = 0
-        for name, param in module.named_parameters():
-            if param.requires_grad and (
-                len(str_filter) == 0 or any([x in name for x in str_filter])
-            ):
-                length += 1
-                self.initial_value[name] = v0 = (
-                    param.clone()
-                    .detach()
-                    .requires_grad_(False)
-                    .to(self.intrinsic_parameter.device)
-                )
-                DD = np.prod(v0.size())
-                self.projection_params[name] = self.get_projection_params(
-                    DD, self.intrinsic_parameter.device
-                )
-                base, localname = module, name
-                while "." in localname:
-                    prefix, localname = localname.split(".", 1)
-                    base = base.__getattr__(prefix)
-                self.name_base_localname.append((name, base, localname))
-                if "intrinsic_parameter" not in name:
-                    param.requires_grad_(False)
-        if said:
-            self.intrinsic_parameter_said = torch.nn.Parameter(
-                torch.ones((length)).cpu()
-                if device == "cpu"
-                else torch.ones((length)).cuda()
-            )
-            module.register_parameter(
-                "intrinsic_parameter_said", self.intrinsic_parameter_said
-            )
-            setattr(module, "intrinsic_parameter_said", self.intrinsic_parameter_said)
+    def set_module_weights(self):
+        updated = self.fastfood(self.intrinsic_parameter)
 
-    def get_projection_params(self, DD, device):
-        if self.projection == "fastfood":
-            return fastfood_vars(DD, device)
-        elif self.projection == "random":
-            return random_vars(DD, self.intrinsic_dimension, device)
+        start, end = 0, 0
+        for i, hidden_param in enumerate(self.hidden_params):
+            start = end
+            end = start + hidden_param.numel
+            theta_0 = self.theta_0[start:end].view(hidden_param.shape)
+            update = updated[start:end].view(hidden_param.shape)
+            if self.use_said:
+                update *= self.said_parameter[i]
 
-    def move_to(self, x_tuple, target):
-        if isinstance(x_tuple, torch.Tensor):
-            return x_tuple.to(target)
-        a = []
-        for x in x_tuple:
-            if isinstance(x, torch.Tensor):
-                a.append(x.to(target))
-            else:
-                a.append(x)
-        return tuple(a)
+            setattr(hidden_param.module, hidden_param.module_name, theta_0 + update)
 
-    def requires_to(self, x_tuple, target):
-        if isinstance(x_tuple, torch.Tensor):
-            x_tuple.requires_grad_(target)
-        for x in x_tuple:
-            if isinstance(x, torch.Tensor):
-                x.requires_grad_(target)
+    def forward(self, *args, **kwargs):
+        self.set_module_weights()
 
-    def projection_vars_requires_grad_(self, requires_grad):
-        for item in self.projection_params.items():
-            self.requires_to(item, requires_grad)
+        return self.hidden(*args, **kwargs)
 
-    def get_projected_param(self, intrinsic_vec, DD, projection_params, init_shape):
-        if self.projection == "fastfood":
-            return fastfood_torched(intrinsic_vec, DD, projection_params).view(
-                init_shape
-            )
-        elif self.projection == "random":
-            return random_torched(intrinsic_vec, projection_params).view(init_shape)
+    @property
+    def hidden(self):
+        return self.m[0]
 
-    def __call__(self, module, inputs):
-        index = 0
-        with torch.enable_grad():
-            for name, base, localname in self.name_base_localname:
-                if localname == "intrinsic_parameter":
-                    continue
-                if self.device == "cpu":
-                    self.initial_value[name] = self.initial_value[name].to(
-                        getattr(base, localname)
-                    )
-                    device_dtype = getattr(base, localname).dtype
+    def __getattr__(self, name):
+        """
+        Somehow we need to call super().__getattr__ to check for model parameters - self._parameters in self.register_parameter
+        """
+        if hasattr(self.hidden, name):
+            return getattr(self.hidden, name)
 
-                init_shape = self.initial_value[name].size()
-                DD = np.prod(init_shape)
-                if self.device == "cpu":
-                    self.projection_params[name] = self.move_to(
-                        self.projection_params[name], module.intrinsic_parameter.device
-                    )
-
-                ray = self.get_projected_param(
-                    module.intrinsic_parameter,
-                    DD,
-                    self.projection_params[name],
-                    init_shape,
-                )
-                if self.said:
-                    ray = ray * self.intrinsic_parameter_said[index]
-                if self.device == "cpu":
-                    param = (self.initial_value[name] + ray).to(device_dtype)
-                else:
-                    param = self.initial_value[name] + ray
-                delattr(base, localname)
-                setattr(base, localname, param)
-                index += 1
-
-    @staticmethod
-    def apply(
-        module,
-        intrinsic_dimension,
-        str_filter=set(),
-        said=False,
-        projection="fastfood",
-        device="cpu",
-    ):
-        for hook in module._forward_pre_hooks.values():
-            if isinstance(hook, IntrinsicDimensionHook):
-                raise RuntimeError(
-                    "Cannot register two intrinsic dimension hooks on the same parameter"
-                )
-
-        fn = IntrinsicDimensionHook(
-            module,
-            intrinsic_dimension,
-            str_filter,
-            said,
-            projection,
-            device,
-        )
-        module.register_forward_pre_hook(fn)
-        return fn
-
-    @staticmethod
-    def apply_with_tensor(module, intrinsic_vector, str_filter=set()):
-        assert isinstance(intrinsic_vector, torch.Tensor) and intrinsic_vector.ndim == 1
-
-        for hook in module._forward_pre_hooks.values():
-            if isinstance(hook, IntrinsicDimensionHook):
-                raise RuntimeError(
-                    "Cannot register two intrinsic dimension hooks on the same parameter"
-                )
-        fn = IntrinsicDimensionHook(module, intrinsic_vector.size(0), str_filter, False)
-        fn.intrinsic_parameter = intrinsic_vector
-        module.register_forward_pre_hook(fn)
-        return fn
+        return super().__getattr__(name)
 
 
-def intrinsic_dimension(
-    module, intrinsic_dimension, str_filter, projection, device="cpu"
-):
-    IntrinsicDimensionHook.apply(
-        module, intrinsic_dimension, str_filter, False, projection, device
-    )
-    return module
-
-
-def intrinsic_dimension_said(
-    module, intrinsic_dimension, str_filter, projection, device="cpu"
-):
-    IntrinsicDimensionHook.apply(
-        module, intrinsic_dimension, str_filter, True, projection, device
-    )
-    return module
+__all__ = ["IntrinsicDimension", "FastfoodTransform"]

@@ -1,7 +1,7 @@
 """Install Compacter."""
 import setuptools
 import torch
-from torch.utils.cpp_extension import CUDAExtension, BuildExtension
+from torch.utils.cpp_extension import BuildExtension, CUDAExtension
 
 description = "PyTorch CUDA kernel implementation of intrinsic dimension operation."
 
