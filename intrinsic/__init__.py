@@ -88,7 +88,9 @@ class IntrinsicDimension(torch.nn.Module):
         # Hide the module from inspection by get_parameters()
         self.m = [module]
 
-        self.device = module.device if hasattr(module, 'device') else torch.device('cpu')
+        self.device = (
+            module.device if hasattr(module, "device") else torch.device("cpu")
+        )
 
         self.use_said = said
 

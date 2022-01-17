@@ -26,7 +26,7 @@ def main():
 
     optimizer = torch.optim.SGD(int_dim.parameters(), lr=0.01)
 
-    for epoch in range(100):
+    for _ in range(100):
         inputs = torch.tensor(range(128), dtype=torch.float32)
         loss = torch.sum(int_dim(inputs))
         print(loss.item())

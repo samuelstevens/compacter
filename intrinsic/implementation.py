@@ -11,6 +11,7 @@ else:
 
 # Utility functions
 
+
 def set_seed(seed: int) -> None:
     random.seed(seed)
     np.random.seed(seed)
@@ -36,7 +37,9 @@ def send_to_device(obj, device):
 
     return obj
 
+
 # Actual implementation
+
 
 class HiddenParam(NamedTuple):
     name: str
