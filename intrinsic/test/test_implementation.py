@@ -4,6 +4,12 @@ import transformers
 from .. import implementation
 
 
+def device():
+    if torch.cuda.is_available():
+        return torch.device("cuda:0")
+    return torch.device("cpu")
+
+
 class NeuralNetwork(torch.nn.Module):
     def __init__(self, layers):
         super().__init__()
@@ -55,7 +61,7 @@ def test_make_hidden_params_gpt2():
 
 
 def test_fast_walsh_hadamard_grad1():
-    in_tensor = torch.ones(2, requires_grad=True, dtype=torch.double)
+    in_tensor = torch.ones(2, requires_grad=True, dtype=torch.double, device=device())
 
     assert torch.autograd.gradcheck(
         implementation.FastWalshHadamard.apply, in_tensor, eps=1e-6, atol=1e-4
@@ -63,7 +69,7 @@ def test_fast_walsh_hadamard_grad1():
 
 
 def test_fast_walsh_hadamard_grad2():
-    in_tensor = torch.randn(4, requires_grad=True, dtype=torch.double)
+    in_tensor = torch.randn(4, requires_grad=True, dtype=torch.double, device=device())
 
     assert torch.autograd.gradcheck(
         implementation.FastWalshHadamard.apply, in_tensor, eps=1e-6, atol=1e-4
@@ -71,7 +77,7 @@ def test_fast_walsh_hadamard_grad2():
 
 
 def test_fast_walsh_hadamard_grad3():
-    in_tensor = torch.randn(64, requires_grad=True, dtype=torch.double)
+    in_tensor = torch.randn(64, requires_grad=True, dtype=torch.double, device=device())
 
     assert torch.autograd.gradcheck(
         implementation.FastWalshHadamard.apply, in_tensor, eps=1e-6, atol=1e-4
@@ -79,10 +85,12 @@ def test_fast_walsh_hadamard_grad3():
 
 
 def test_fast_walsh_hadamard_forward():
-    in_tensor = torch.tensor([1, 0, 1, 0, 0, 1, 1, 0], dtype=torch.float)
+    in_tensor = torch.tensor(
+        [1, 0, 1, 0, 0, 1, 1, 0], dtype=torch.float, device=device()
+    )
 
     actual = implementation.FastWalshHadamard.apply(in_tensor)
 
-    expected = torch.tensor([4, 2, 0, -2, 0, 2, 0, 2], dtype=torch.float)
+    expected = torch.tensor([4, 2, 0, -2, 0, 2, 0, 2], dtype=torch.float, device=device())
 
     assert torch.allclose(expected, actual)

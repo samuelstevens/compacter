@@ -19,22 +19,22 @@ class FastfoodTransform(torch.nn.Module):
         self.D = D
 
         # smallest integer that is larger than log base 2 of dimension
-        ll = int(np.ceil(np.log(self.D) / np.log(2)))
+        ll = int(np.ceil(np.log2(self.D)))
         self.LL = 2 ** ll
 
         # Binary scaling matrix where $B_{i,i} \in \{\pm 1 \}$ drawn iid
-        BB = torch.FloatTensor(self.LL).uniform_(0, 2).type(torch.LongTensor)
+        BB = torch.randint(0, 2, size=(self.LL,))
         BB = (BB * 2 - 1).type(torch.FloatTensor)
         BB.requires_grad = False
         self.register_buffer("BB", BB)
 
         # Random permutation matrix
-        Pi = torch.LongTensor(np.random.permutation(self.LL))
+        Pi = torch.randperm(self.LL)
         Pi.requires_grad = False
         self.register_buffer("Pi", Pi)
 
         # Gaussian scaling matrix, whose elements $G_{i,i} \sim \mathcal{N}(0, 1)$
-        GG = torch.FloatTensor(self.LL).normal_()
+        GG = torch.randn(self.LL)
         GG.requires_grad = False
         self.register_buffer("GG", GG)
 
@@ -157,22 +157,16 @@ class IntrinsicDimension(torch.nn.Module):
             "Before moving [max memory allocated: %.3f]",
             torch.cuda.max_memory_allocated(),
         )
-        self.device = device
+
+        super().to(device)  # moves theta_d
+        self.logger.debug(
+            "After super().to(device) [max memory allocated: %.3f]",
+            torch.cuda.max_memory_allocated(),
+        )
 
         self.theta_0 = implementation.send_to_device(self.theta_0, device)
         self.logger.debug(
             "After moving theta_0 [max memory allocated: %.3f]",
-            torch.cuda.max_memory_allocated(),
-        )
-        super().to(device)  # moves theta_d
-        self.logger.debug(
-            "After moving theta_d [max memory allocated: %.3f]",
-            torch.cuda.max_memory_allocated(),
-        )
-
-        self.fastfood = implementation.send_to_device(self.fastfood, device)
-        self.logger.debug(
-            "After moving fastfood [max memory allocated: %.3f]",
             torch.cuda.max_memory_allocated(),
         )
 
@@ -186,6 +180,8 @@ class IntrinsicDimension(torch.nn.Module):
             "After moving base model [max memory allocated: %.3f]",
             torch.cuda.max_memory_allocated(),
         )
+
+        self.device = device
 
         with torch.no_grad():
             torch.cuda.empty_cache()
