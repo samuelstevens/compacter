@@ -7,7 +7,7 @@ import torch
 if torch.cuda.is_available():
     from .fwh_cuda import fast_walsh_hadamard_transform  # type: ignore
 else:
-    from .fwh import fast_walsh_hadamard_transform
+    from .fwh import fast_walsh_hadamard_transform  # type: ignore
 
 # Utility functions
 

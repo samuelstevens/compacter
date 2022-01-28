@@ -91,6 +91,8 @@ def test_fast_walsh_hadamard_forward():
 
     actual = implementation.FastWalshHadamard.apply(in_tensor)
 
-    expected = torch.tensor([4, 2, 0, -2, 0, 2, 0, 2], dtype=torch.float, device=device())
+    expected = torch.tensor(
+        [4, 2, 0, -2, 0, 2, 0, 2], dtype=torch.float, device=device()
+    )
 
     assert torch.allclose(expected, actual)
