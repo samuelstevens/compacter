@@ -6,7 +6,7 @@ def fast_walsh_hadamard_transform(x, normalize: bool = True):
     orig_shape = x.size()
     h_dim = orig_shape[0]
     h_dim_exp = int(round(np.log(h_dim) / np.log(2)))
-    assert h_dim == 2 ** h_dim_exp, (
+    assert h_dim == 2**h_dim_exp, (
         "hadamard can only be computed over axis with size that is a power of two, but"
         " chosen axis %d has size %d" % (0, h_dim)
     )

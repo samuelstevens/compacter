@@ -20,7 +20,7 @@ class FastfoodTransform(torch.nn.Module):
 
         # smallest integer that is larger than log base 2 of dimension
         ll = int(np.ceil(np.log2(self.D)))
-        self.LL = 2 ** ll
+        self.LL = 2**ll
 
         # Binary scaling matrix where $B_{i,i} \in \{\pm 1 \}$ drawn iid
         BB = torch.randint(0, 2, size=(self.LL,))
