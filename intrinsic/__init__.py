@@ -135,8 +135,10 @@ class IntrinsicDimension(torch.nn.Module):
             setattr(hidden_param.module, hidden_param.module_name, theta_0 + update)
 
     def forward(self, *args, **kwargs):
+        # Uses the intrinsic dimension vector to update the underlying model weights.
         self.set_module_weights()
 
+        # Does normal forward pass of underlying model.
         return self.hidden(*args, **kwargs)
 
     @property
