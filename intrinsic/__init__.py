@@ -50,7 +50,7 @@ class FastfoodTransform(torch.nn.Module):
         :param x: array of dd dimension
         :return:
         """
-        assert x.shape == (self.d,)
+        assert x.shape == (self.d,), f"{x.shape} != {(self.d,)}"
 
         # Pad x if needed
         d_pad = torch.nn.functional.pad(
