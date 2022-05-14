@@ -1,8 +1,9 @@
-# The codes are from Armen Aghajanyan from facebook, from paper
+# The code is from Armen Aghajanyan from facebook, from paper
 # Intrinsic Dimensionality Explains the Effectiveness of Language Model Fine-Tuning
 # https://arxiv.org/abs/2012.13255
 
 import logging
+from typing import Callable
 
 import numpy as np
 import torch
@@ -76,13 +77,24 @@ class FastfoodTransform(torch.nn.Module):
             mul_5[: self.D], self.divisor * np.sqrt(float(self.D) / self.LL)
         )
 
+    def extra_repr(self) -> str:
+        return f"d={self.d}, D={self.D}"
+
 
 class IntrinsicDimension(torch.nn.Module):
     logger = logging.getLogger("intrinsic.IntrinsicDimension")
 
     def __init__(
-        self, module: torch.nn.Module, int_dim: int, said: bool, fastfood_seed: int
+        self,
+        module: torch.nn.Module,
+        int_dim: int,
+        said: bool,
+        projection_factory: Callable[[int, int], torch.nn.Module],
+        seed: int,
     ):
+        assert callable(projection_factory)
+        assert isinstance(int_dim, int), f"int_dim must be an int, not {type(int_dim)}"
+
         super().__init__()
 
         # Hide the module from inspection by get_parameters()
@@ -92,19 +104,15 @@ class IntrinsicDimension(torch.nn.Module):
             module.device if hasattr(module, "device") else torch.device("cpu")
         )
 
-        self.use_said = said
-
         self.hidden_params, self.theta_0 = implementation.make_hidden_params(module)
 
         for hidden_param in self.hidden_params:
             delattr(hidden_param.module, hidden_param.module_name)
 
-        self.fastfood_seed = fastfood_seed
-        implementation.set_seed(self.fastfood_seed)
-
         D = self.theta_0.shape[0]
-        self.fastfood = FastfoodTransform(int_dim, D)
+        self.projection = projection_factory(int_dim, D)
 
+        self.use_said = said
         self.said_size = len(self.hidden_params)
         if self.use_said:
             assert int_dim > self.said_size
@@ -116,12 +124,14 @@ class IntrinsicDimension(torch.nn.Module):
         if self.use_said:
             self.said_parameter = torch.nn.Parameter(torch.ones((self.said_size)))
 
+        self.seed = seed
+
         self.logger.info(
             f"Initialized Fastfood wrapper around {module.__class__.__name__}."
         )
 
     def set_module_weights(self):
-        updated = self.fastfood(self.intrinsic_vector)
+        updated = self.projection(self.intrinsic_vector)
 
         start, end = 0, 0
         for i, hidden_param in enumerate(self.hidden_params):
