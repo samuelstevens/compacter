@@ -1,6 +1,7 @@
 # The code is from Armen Aghajanyan from facebook, from paper
 # Intrinsic Dimensionality Explains the Effectiveness of Language Model Fine-Tuning
 # https://arxiv.org/abs/2012.13255
+# And https://github.com/jgamper/intrinsic-dimensionality/blob/master/intrinsic/fastfood.py
 
 import logging
 from typing import Callable
@@ -39,12 +40,6 @@ class FastfoodTransform(torch.nn.Module):
         GG.requires_grad = False
         self.register_buffer("GG", GG)
 
-        # single divisor to normalize transform
-        divisor = torch.sqrt(self.LL * torch.sum(torch.pow(self.GG, 2)))
-        self.register_buffer("divisor", divisor)
-
-        self.walsh_hadamard = None
-
     def forward(self, x):
         """
         Fastfood transform
@@ -71,10 +66,29 @@ class FastfoodTransform(torch.nn.Module):
         mul_4 = mul_3 * self.GG
 
         # (HGPiHBX)
-        mul_5 = implementation.FastWalshHadamard.apply(mul_4)
+        return implementation.FastWalshHadamard.apply(mul_4)
+
+
+class NormalizedFastfoodTransform(FastfoodTransform):
+    logger = logging.getLogger("NormalizedFastfoodTransform")
+
+    def __init__(self, d, D):
+        super().__init__(d, D)
+
+        # single divisor to normalize transform
+        divisor = torch.sqrt(self.LL * torch.sum(torch.pow(self.GG, 2)))
+        self.register_buffer("divisor", divisor)
+
+    def forward(self, x):
+        """
+        Fastfood transform
+        :param x: array of dd dimension
+        :return:
+        """
+        transformed = super().forward(x)
 
         return torch.div(
-            mul_5[: self.D], self.divisor * np.sqrt(float(self.D) / self.LL)
+            transformed[: self.D], self.divisor * np.sqrt(float(self.D) / self.LL)
         )
 
     def extra_repr(self) -> str:
