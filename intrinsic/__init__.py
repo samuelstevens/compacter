@@ -9,7 +9,7 @@ from typing import Callable
 import numpy as np
 import torch
 
-from . import implementation
+from . import implementation, utils
 
 
 class FastfoodTransform(torch.nn.Module):
@@ -47,6 +47,7 @@ class FastfoodTransform(torch.nn.Module):
         :return:
         """
         assert x.shape == (self.d,), f"{x.shape} != {(self.d,)}"
+        breakpoint()
 
         # Pad x if needed
         d_pad = torch.nn.functional.pad(
@@ -126,11 +127,16 @@ class IntrinsicDimension(torch.nn.Module):
         D = self.theta_0.shape[0]
         self.projection = projection_factory(int_dim, D)
 
+        # Structure-aware intrinsic dimension
         self.use_said = said
         self.said_size = len(self.hidden_params)
         if self.use_said:
             assert int_dim > self.said_size
             int_dim -= self.said_size + 1
+
+        # For splitting into multiple modules.
+        self.base_device = torch.device("cpu")
+        self.projection_device = torch.device("cpu")
 
         self.d = int_dim
         self.intrinsic_vector = torch.nn.Parameter(torch.zeros((int_dim)))
@@ -142,8 +148,77 @@ class IntrinsicDimension(torch.nn.Module):
         self.seed = seed
 
         self.logger.info(
-            f"Initialized Fastfood wrapper around {module.__class__.__name__}."
+            f"Initialized intrinsic wrapper around {module.__class__.__name__}."
         )
+
+    def to(self, *devices, non_blocking=False) -> "IntrinsicDimension":
+        if len(devices) == 1:
+            self.logger.debug(
+                "Before moving [max memory allocated: %.3f]",
+                torch.cuda.max_memory_allocated(),
+            )
+            # move entire model to the device
+            device = devices[0]
+
+            self.base_device = device
+            self.projection_device = device
+
+            self.theta_0 = utils.send_to_device(self.theta_0, device)
+            self.logger.debug(
+                "After moving theta_0 [max memory allocated: %.3f]",
+                torch.cuda.max_memory_allocated(),
+            )
+            super().to(device)  # moves theta_d
+            self.logger.debug(
+                "After moving theta_d [max memory allocated: %.3f]",
+                torch.cuda.max_memory_allocated(),
+            )
+
+            self.projection = utils.send_to_device(self.projection, device)
+            self.logger.debug(
+                "After moving projection [max memory allocated: %.3f]",
+                torch.cuda.max_memory_allocated(),
+            )
+
+            self.set_module_weights()  # moves base model
+            self.logger.debug(
+                "After updating base model weights [max memory allocated: %.3f]",
+                torch.cuda.max_memory_allocated(),
+            )
+            self.hidden.to(device)
+            self.logger.debug(
+                "After moving base model [max memory allocated: %.3f]",
+                torch.cuda.max_memory_allocated(),
+            )
+
+        elif len(devices) >= 2:
+            # Move the base model to the first device (input device)
+            # Move the projection model to the second device
+            # Ignore the other devices
+            base_device, projection_device, *_ = devices
+
+            # save these devices so we can move tensors during the forward pass
+            self.base_device = base_device
+            self.projection_device = projection_device
+
+            self.theta_0 = utils.send_to_device(self.theta_0, projection_device)
+            super().to(projection_device)  # moves theta_d
+
+            self.projection = utils.send_to_device(self.projection, projection_device)
+
+            self.set_module_weights()  # moves base model
+            self.hidden.to(base_device)
+
+        else:
+            # didn't get any devices
+            raise ValueError("Must provide at least one device!")
+
+        with torch.no_grad():
+            torch.cuda.empty_cache()
+
+        breakpoint()
+
+        return self
 
     def set_module_weights(self):
         updated = self.projection(self.intrinsic_vector)
@@ -158,7 +233,11 @@ class IntrinsicDimension(torch.nn.Module):
             if self.use_said:
                 update *= self.said_parameter[i]
 
-            setattr(hidden_param.module, hidden_param.module_name, theta_0 + update)
+            setattr(
+                hidden_param.module,
+                hidden_param.module_name,
+                (theta_0 + update).to(self.base_device),
+            )
 
     def forward(self, *args, **kwargs):
         # Uses the intrinsic dimension vector to update the underlying model weights.
@@ -179,42 +258,6 @@ class IntrinsicDimension(torch.nn.Module):
             return getattr(self.hidden, name)
 
         return super().__getattr__(name)
-
-    def to(self, device, non_blocking=False):
-        self.logger.debug(
-            "Before moving [max memory allocated: %.3f]",
-            torch.cuda.max_memory_allocated(),
-        )
-
-        super().to(device)  # moves theta_d
-        self.logger.debug(
-            "After super().to(device) [max memory allocated: %.3f]",
-            torch.cuda.max_memory_allocated(),
-        )
-
-        self.theta_0 = implementation.send_to_device(self.theta_0, device)
-        self.logger.debug(
-            "After moving theta_0 [max memory allocated: %.3f]",
-            torch.cuda.max_memory_allocated(),
-        )
-
-        self.set_module_weights()  # moves base model
-        self.logger.debug(
-            "After updating base model weights [max memory allocated: %.3f]",
-            torch.cuda.max_memory_allocated(),
-        )
-        self.hidden.to(device)
-        self.logger.debug(
-            "After moving base model [max memory allocated: %.3f]",
-            torch.cuda.max_memory_allocated(),
-        )
-
-        self.device = device
-
-        with torch.no_grad():
-            torch.cuda.empty_cache()
-
-        return self
 
 
 __all__ = ["IntrinsicDimension", "FastfoodTransform"]
