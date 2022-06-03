@@ -134,6 +134,7 @@ class IntrinsicDimension(torch.nn.Module):
 
         self.d = int_dim
         self.intrinsic_vector = torch.nn.Parameter(torch.zeros((int_dim)))
+        self.L2_delta_theta_D = 0
 
         if self.use_said:
             self.said_parameter = torch.nn.Parameter(torch.ones((self.said_size)))
@@ -146,6 +147,7 @@ class IntrinsicDimension(torch.nn.Module):
 
     def set_module_weights(self):
         updated = self.projection(self.intrinsic_vector)
+        self.L2_delta_theta_D = torch.linalg.norm(updated)
 
         start, end = 0, 0
         for i, hidden_param in enumerate(self.hidden_params):
