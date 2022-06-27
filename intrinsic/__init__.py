@@ -105,6 +105,7 @@ class IntrinsicDimension(torch.nn.Module):
         said: bool,
         projection_factory: Callable[[int, int], torch.nn.Module],
         seed: int,
+        track_l2_delta_theta_D: bool = False,
     ):
         assert callable(projection_factory)
         assert isinstance(int_dim, int), f"int_dim must be an int, not {type(int_dim)}"
@@ -140,7 +141,12 @@ class IntrinsicDimension(torch.nn.Module):
 
         self.d = int_dim
         self.intrinsic_vector = torch.nn.Parameter(torch.zeros((int_dim)))
+        # ||delta theta D||
+        # The magnitude of the change in the original parameter space
         self.L2_delta_theta_D = 0
+        # Don't always track this because it requires more memory than is available
+        # on RTX 2080TIs.
+        self.track_l2_delta_theta_D = track_l2_delta_theta_D
 
         if self.use_said:
             self.said_parameter = torch.nn.Parameter(torch.ones((self.said_size)))
@@ -202,12 +208,34 @@ class IntrinsicDimension(torch.nn.Module):
             self.projection_device = projection_device
 
             self.theta_0s = utils.send_to_device(self.theta_0s, projection_device)
+            self.logger.debug(
+                "After moving theta_0 [max memory allocated: %.3f]",
+                torch.cuda.max_memory_allocated(),
+            )
+
             super().to(projection_device)  # moves theta_d
+            self.logger.debug(
+                "After moving theta_d [max memory allocated: %.3f]",
+                torch.cuda.max_memory_allocated(),
+            )
 
             self.projections = utils.send_to_device(self.projections, projection_device)
+            self.logger.debug(
+                "After moving projections [max memory allocated: %.3f]",
+                torch.cuda.max_memory_allocated(),
+            )
 
             self.set_module_weights()  # moves base model
+            self.logger.debug(
+                "After updating base model weights [max memory allocated: %.3f]",
+                torch.cuda.max_memory_allocated(),
+            )
+
             self.hidden.to(base_device)
+            self.logger.debug(
+                "After moving base model [max memory allocated: %.3f]",
+                torch.cuda.max_memory_allocated(),
+            )
 
         else:
             # didn't get any devices
@@ -227,8 +255,9 @@ class IntrinsicDimension(torch.nn.Module):
                 : hidden_param.numel
             ].view(hidden_param.shape)
 
-            # For keeping track of ||delta theta D||
-            update_squared_sum += torch.sum(torch.pow(update))
+            if self.track_l2_delta_theta_D:
+                # For keeping track of ||delta theta D||
+                update_squared_sum += torch.sum(torch.pow(update, 2))
 
             theta_0 = self.theta_0s[hidden_param.name].view(hidden_param.shape)
             if self.use_said:
@@ -240,7 +269,8 @@ class IntrinsicDimension(torch.nn.Module):
                 (theta_0 + update).to(self.base_device),
             )
 
-        self.L2_delta_theta_D = torch.sqrt(update_squared_sum)
+        if self.track_l2_delta_theta_D:
+            self.L2_delta_theta_D = torch.sqrt(update_squared_sum)
 
     def forward(self, *args, **kwargs):
         # Uses the intrinsic dimension vector to update the underlying model weights.
