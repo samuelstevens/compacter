@@ -47,7 +47,6 @@ class FastfoodTransform(torch.nn.Module):
         :return:
         """
         assert x.shape == (self.d,), f"{x.shape} != {(self.d,)}"
-        breakpoint()
 
         # Pad x if needed
         d_pad = torch.nn.functional.pad(
@@ -119,13 +118,14 @@ class IntrinsicDimension(torch.nn.Module):
             module.device if hasattr(module, "device") else torch.device("cpu")
         )
 
-        self.hidden_params, self.theta_0 = implementation.make_hidden_params(module)
+        self.hidden_params, self.theta_0s = implementation.make_hidden_params(module)
+        self.projections = {}
 
         for hidden_param in self.hidden_params:
+            self.projections[hidden_param.name] = projection_factory(
+                int_dim, hidden_param.numel
+            )
             delattr(hidden_param.module, hidden_param.module_name)
-
-        D = self.theta_0.shape[0]
-        self.projection = projection_factory(int_dim, D)
 
         # Structure-aware intrinsic dimension
         self.use_said = said
@@ -163,7 +163,7 @@ class IntrinsicDimension(torch.nn.Module):
             self.base_device = device
             self.projection_device = device
 
-            self.theta_0 = utils.send_to_device(self.theta_0, device)
+            self.theta_0s = utils.send_to_device(self.theta_0s, device)
             self.logger.debug(
                 "After moving theta_0 [max memory allocated: %.3f]",
                 torch.cuda.max_memory_allocated(),
@@ -174,9 +174,9 @@ class IntrinsicDimension(torch.nn.Module):
                 torch.cuda.max_memory_allocated(),
             )
 
-            self.projection = utils.send_to_device(self.projection, device)
+            self.projections = utils.send_to_device(self.projections, device)
             self.logger.debug(
-                "After moving projection [max memory allocated: %.3f]",
+                "After moving projections [max memory allocated: %.3f]",
                 torch.cuda.max_memory_allocated(),
             )
 
@@ -201,10 +201,10 @@ class IntrinsicDimension(torch.nn.Module):
             self.base_device = base_device
             self.projection_device = projection_device
 
-            self.theta_0 = utils.send_to_device(self.theta_0, projection_device)
+            self.theta_0s = utils.send_to_device(self.theta_0s, projection_device)
             super().to(projection_device)  # moves theta_d
 
-            self.projection = utils.send_to_device(self.projection, projection_device)
+            self.projections = utils.send_to_device(self.projections, projection_device)
 
             self.set_module_weights()  # moves base model
             self.hidden.to(base_device)
@@ -216,20 +216,21 @@ class IntrinsicDimension(torch.nn.Module):
         with torch.no_grad():
             torch.cuda.empty_cache()
 
-        breakpoint()
-
         return self
 
     def set_module_weights(self):
-        updated = self.projection(self.intrinsic_vector)
-        self.L2_delta_theta_D = torch.linalg.norm(updated)
+        # For keeping track of ||delta theta D||
+        update_squared_sum = 0
 
-        start, end = 0, 0
         for i, hidden_param in enumerate(self.hidden_params):
-            start = end
-            end = start + hidden_param.numel
-            theta_0 = self.theta_0[start:end].view(hidden_param.shape)
-            update = updated[start:end].view(hidden_param.shape)
+            update = self.projections[hidden_param.name](self.intrinsic_vector)[
+                : hidden_param.numel
+            ].view(hidden_param.shape)
+
+            # For keeping track of ||delta theta D||
+            update_squared_sum += torch.sum(torch.pow(update))
+
+            theta_0 = self.theta_0s[hidden_param.name].view(hidden_param.shape)
             if self.use_said:
                 update *= self.said_parameter[i]
 
@@ -238,6 +239,8 @@ class IntrinsicDimension(torch.nn.Module):
                 hidden_param.module_name,
                 (theta_0 + update).to(self.base_device),
             )
+
+        self.L2_delta_theta_D = torch.sqrt(update_squared_sum)
 
     def forward(self, *args, **kwargs):
         # Uses the intrinsic dimension vector to update the underlying model weights.
@@ -251,9 +254,6 @@ class IntrinsicDimension(torch.nn.Module):
         return self.m[0]
 
     def __getattr__(self, name):
-        """
-        Somehow we need to call super().__getattr__ to check for model parameters - self._parameters in self.register_parameter
-        """
         if hasattr(self.hidden, name):
             return getattr(self.hidden, name)
 

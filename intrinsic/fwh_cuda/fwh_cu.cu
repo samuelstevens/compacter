@@ -2,6 +2,8 @@
 // Intrinsic Dimensionality Explains the Effectiveness of Language Model Fine-Tuning
 // https://arxiv.org/abs/2012.13255
 
+// https://github.com/rabeehk/compacter/tree/main/seq2seq/projections
+
 #include <torch/extension.h>
 
 #include <cuda.h>

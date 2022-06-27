@@ -4,10 +4,7 @@ from typing import List, NamedTuple, Tuple
 import numpy as np
 import torch
 
-if torch.cuda.is_available():
-    from .fwh_cuda import fast_walsh_hadamard_transform  # type: ignore
-else:
-    from .fwh import fast_walsh_hadamard_transform  # type: ignore
+from .fwh import fast_walsh_hadamard_transform  # type: ignore
 
 # Utility functions
 
@@ -51,7 +48,7 @@ class HiddenParam(NamedTuple):
 
 def make_hidden_params(module) -> Tuple[List[HiddenParam], torch.Tensor]:
     hidden_params = []
-    theta_0s = []
+    theta_0s = {}
 
     # Iterate over layers in the module
     for name, param in sorted(list(module.named_parameters())):
@@ -60,7 +57,7 @@ def make_hidden_params(module) -> Tuple[List[HiddenParam], torch.Tensor]:
             continue
 
         # Saves the initial values of the initialised parameters from param.data and sets them to no grad.
-        theta_0s.append(param.detach().requires_grad_(False))
+        theta_0s[name] = param.detach().requires_grad_(False)
 
         base, localname = module, name
         while "." in localname:
@@ -70,16 +67,7 @@ def make_hidden_params(module) -> Tuple[List[HiddenParam], torch.Tensor]:
         numel = int(np.prod(param.shape))
         hidden_params.append(HiddenParam(name, base, localname, param.shape, numel))
 
-    flat_theta_0s = []
-    for theta_0 in theta_0s:
-        if len(theta_0.shape) > 1:
-            theta_0 = theta_0.flatten().squeeze()
-        flat_theta_0s.append(theta_0)
-
-    # Stores the initial value: \theta_{0}^{D}
-    theta_0 = torch.cat(flat_theta_0s)
-
-    return hidden_params, theta_0
+    return hidden_params, theta_0s
 
 
 class FastWalshHadamard(torch.autograd.Function):
