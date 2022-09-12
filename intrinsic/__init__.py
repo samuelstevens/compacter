@@ -68,6 +68,9 @@ class FastfoodTransform(torch.nn.Module):
         # (HGPiHBX)
         return implementation.FastWalshHadamard.apply(mul_4)
 
+    def extra_repr(self) -> str:
+        return f"d={self.d}, D={self.D}"
+
 
 class NormalizedFastfoodTransform(FastfoodTransform):
     logger = logging.getLogger("NormalizedFastfoodTransform")
@@ -92,7 +95,37 @@ class NormalizedFastfoodTransform(FastfoodTransform):
         )
 
     def extra_repr(self) -> str:
-        return f"d={self.d}, D={self.D}"
+        return f"d={self.d}, D={self.D}, div={self.divisor}"
+
+
+class ScaledFastfoodTransform(FastfoodTransform):
+    logger = logging.getLogger("NormalizedFastfoodTransform")
+
+    def __init__(self, d, D, scaling_factor):
+        super().__init__(d, D)
+
+        # single divisor to normalize transform
+        divisor = torch.sqrt(self.LL * torch.sum(torch.pow(self.GG, 2)))
+        self.register_buffer("divisor", divisor)
+
+        self.scaling_factor = scaling_factor
+
+    def forward(self, x):
+        """
+        Fastfood transform
+        :param x: array of dd dimension
+        :return:
+        """
+        transformed = super().forward(x)
+
+        normalized = torch.div(
+            transformed[: self.D], self.divisor * np.sqrt(float(self.D) / self.LL)
+        )
+
+        return torch.mul(normalized[: self.D], self.scaling_factor)
+
+    def extra_repr(self) -> str:
+        return f"d={self.d}, D={self.D}, div={self.divisor}, S={self.scaling_factor}"
 
 
 class IntrinsicDimension(torch.nn.Module):
@@ -290,4 +323,4 @@ class IntrinsicDimension(torch.nn.Module):
         return super().__getattr__(name)
 
 
-__all__ = ["IntrinsicDimension", "FastfoodTransform"]
+__all__ = ["IntrinsicDimension", "FastfoodTransform", "NormalizedFastfoodTransform"]
